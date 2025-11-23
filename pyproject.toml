@@ -1,0 +1,30 @@
+[project]
+name = "audiobook-player"
+version = "0.0.1"
+description = "Simple audiobook player"
+readme = "README.md"
+authors = [{name = "Sukhbinder Singh"}]
+license = {text = "Apache-2.0"}
+requires-python = ">=3.8"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License"
+]
+dependencies = [
+    "click"
+]
+
+[project.urls]
+Homepage = "https://github.com/sukhbinder/audiobook-player"
+Changelog = "https://github.com/sukhbinder/audiobook-player/releases"
+Issues = "https://github.com/sukhbinder/audiobook-player/issues"
+CI = "https://github.com/sukhbinder/audiobook-player/actions"
+
+[project.scripts]
+aplayer = "audiobook_player.cli:cli"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
