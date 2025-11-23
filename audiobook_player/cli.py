@@ -1,8 +1,11 @@
 import argparse
 
+from .audioplayer import AudiobookPlayer
+
+
 def create_parser():
     parser = argparse.ArgumentParser(description="Simple audiobook player")
-    parser.add_argument("name", type=str, help="Dummy argument")
+    parser.add_argument("folder", type=str, help="Folder path")
     return parser
 
 
@@ -10,8 +13,14 @@ def cli():
     "Simple audiobook player"
     parser = create_parser()
     args = parser.parse_args()
-    mycommand(args)
+    main(args)
 
 
-def mycommand(args):
-    print(args)
+def main(args):
+    if args.folder:
+        folder = args.folder
+    else:
+        folder = input("Enter audiobook folder: ").strip()
+
+    player = AudiobookPlayer(folder)
+    player.start()
