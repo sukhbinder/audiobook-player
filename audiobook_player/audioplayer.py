@@ -124,7 +124,11 @@ PROGRESS_FILENAME = ".progress.json"
 
 
 def natural_key(s: str):
-    parts = re.split(r"(\d+)", s)
+    name, ext = os.path.splitext(s)
+    parts = re.split(r"(\d+)", name)
+    # filter out empty strings
+    parts = list(filter(None, parts))
+    parts.append(ext)
     return [int(p) if p.isdigit() else p.lower() for p in parts]
 
 
