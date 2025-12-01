@@ -87,7 +87,7 @@ class OmxPlayer(MediaPlayerBase):
         try:
             # Use local audio output
             self.proc = subprocess.Popen(
-                ["omxplayer", "-o", "local", filepath],
+                ["omxplayer", "--no-keys", "--no-osd", "-o", "local", filepath],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
             )
@@ -236,28 +236,31 @@ class AudiobookPlayer:
             self.getch.disable_raw()
 
     def _print_controls(self):
-        print("Controls: n=next, p=prev, s=stop & save, q=quit\n")
+        self.safe_print("Controls: n=next, p=prev, s=stop & save, q=quit\n")
+
+    def safe_print(self, msg=""):
+        print("\r" + msg, flush=True)
 
     def _handle_cmd(self, cmd):
         cmd = cmd.lower()
         if cmd == "n":
-            print("\nSkipping to next.")
+            self.safe_print("Skipping to next.")
             self.player.stop()
             self.current = min(self.current + 1, len(self.chapters) - 1)
 
         elif cmd == "p":
-            print("\nGoing to previous.")
+            self.safe_print("\nGoing to previous.")
             self.player.stop()
             self.current = max(self.current - 1, 0)
 
         elif cmd == "s":
-            print("\nStopping and saving progress.")
+            self.safe_print("\nStopping and saving progress.")
             save_progress(self.folder, self.current)
             self.player.stop()
             self.stop_flag.set()
 
         elif cmd == "q":
-            print("\nQuitting (progress saved).")
+            self.safe_print("\nQuitting (progress saved).")
             save_progress(self.folder, self.current)
             self.player.stop()
             self.stop_flag.set()
@@ -288,7 +291,7 @@ class AudiobookPlayer:
 
             chapter = self.chapters[self.current]
             print(
-                f"\nPlaying chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter)}"
+                f"\nPlaying chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter)}\n"
             )
 
             self.player.play(chapter)
