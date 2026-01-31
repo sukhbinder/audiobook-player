@@ -290,8 +290,8 @@ class AudiobookPlayer:
                 break
 
             chapter = self.chapters[self.current]
-            print(
-                f"\nPlaying chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter)}\n"
+            self.safe_print(
+                f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter)}\n"
             )
 
             self.player.play(chapter)
