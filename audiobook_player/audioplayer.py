@@ -178,11 +178,24 @@ def find_mp3_files(folder: str):
     return [os.path.join(folder, f) for f in files]
 
 
-def save_progress(folder: str, idx: int):
+def save_progress(folder: str, idx: int, durations: dict = None):
     path = os.path.join(folder, PROGRESS_FILENAME)
     try:
+        progress_data = {}
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                progress_data = json.load(f)
+
+        progress_data["last_chapter"] = idx
+
+        # Only update durations if provided
+        if durations is not None:
+            if "durations" not in progress_data:
+                progress_data["durations"] = {}
+            progress_data["durations"].update(durations)
+
         with open(path, "w") as f:
-            json.dump({"last_chapter": idx}, f)
+            json.dump(progress_data, f)
     except Exception as e:
         print(f"Warning: could not save progress: {e}")
 
@@ -190,13 +203,18 @@ def save_progress(folder: str, idx: int):
 def load_progress(folder: str):
     path = os.path.join(folder, PROGRESS_FILENAME)
     if not os.path.exists(path):
-        return None
+        return None, {}
+
     try:
         with open(path, "r") as f:
             obj = json.load(f)
-        return obj.get("last_chapter")
-    except:
-        return None
+
+        last_chapter = obj.get("last_chapter")
+        durations = obj.get("durations", {})
+
+        return last_chapter, durations
+    except Exception:
+        return None, {}
 
 
 ############################################################
@@ -220,6 +238,65 @@ class Getch:
 
 
 ############################################################
+# Duration Calculator (Background Thread)
+############################################################
+
+class DurationCalculator:
+    def __init__(self, chapters, existing_durations=None):
+        self.chapters = chapters
+        self.durations = existing_durations or {}
+        self.lock = threading.Lock()
+        self.calculation_complete = threading.Event()
+        self.update_callbacks = []
+
+    def calculate_missing_durations(self):
+        """Calculate durations for files not in cache (background thread)"""
+        try:
+            missing_files = [
+                chap for chap in self.chapters
+                if os.path.basename(chap) not in self.durations
+            ]
+
+            new_durations = {}
+            for chapter in missing_files:
+                duration = get_mp3_duration(chapter)
+                if duration is not None:
+                    filename = os.path.basename(chapter)
+                    with self.lock:
+                        self.durations[filename] = duration
+                        new_durations[filename] = duration
+
+            # Notify callbacks if we have new durations
+            if new_durations:
+                for callback in self.update_callbacks:
+                    try:
+                        callback(new_durations)
+                    except Exception:
+                        pass
+
+            self.calculation_complete.set()
+            return new_durations
+
+        except Exception:
+            self.calculation_complete.set()
+            return {}
+
+    def get_duration(self, chapter_path):
+        """Get duration for a chapter (thread-safe)"""
+        filename = os.path.basename(chapter_path)
+        with self.lock:
+            return self.durations.get(filename)
+
+    def add_update_callback(self, callback):
+        """Add callback for when durations are updated"""
+        self.update_callbacks.append(callback)
+
+    def is_complete(self):
+        """Check if background calculation is complete"""
+        return self.calculation_complete.is_set()
+
+
+############################################################
 # Main Audiobook Player
 ############################################################
 
@@ -236,39 +313,80 @@ class AudiobookPlayer:
         # plug-in backend
         self.player = get_media_player()
 
+        # Initialize durations and start background calculation
+        self.duration_calculator = None
+        self._initialize_durations()
+
         signal.signal(signal.SIGINT, self._on_sigint)
 
     def _on_sigint(self, sig, frame):
         print("\nCaught Ctrl+C — restoring terminal.")
         self.stop_flag.set()
         self.player.stop()
-        save_progress(self.folder, self.current)
+        save_progress(
+            self.folder, 
+            self.current,
+            self.duration_calculator.durations if self.duration_calculator else {}
+        )
         if self.getch:
             self.getch.disable_raw()
         sys.exit(0)
 
-    def list_chapters(self):
+    def list_chapters(self, block_for_durations=True):
         """List all chapters with their durations."""
         if not self.chapters:
             print("No MP3 files found.")
             return
         
+        # For --list command, block until all durations are calculated
+        if block_for_durations:
+            # Check if we have all durations already
+            with self.duration_calculator.lock:
+                missing_count = sum(
+                    1 for chap in self.chapters 
+                    if os.path.basename(chap) not in self.duration_calculator.durations
+                )
+            
+            if missing_count > 0:
+                print("Calculating durations...")
+                self.duration_calculator.calculate_missing_durations()
+        
         print(f"Found {len(self.chapters)} chapters in '{self.folder}':")
         print("-" * 60)
         
         for i, chapter in enumerate(self.chapters, 1):
-            duration = get_mp3_duration(chapter)
-            duration_str = format_duration(duration)
+            duration = self.duration_calculator.get_duration(chapter)
+            duration_str = format_duration(duration) if duration is not None else "Unknown"
             filename = os.path.basename(chapter)
             print(f"{i:2d}. {filename:40s} {duration_str}")
         
         print("-" * 60)
-        total_duration = sum(get_mp3_duration(chapter) for chapter in self.chapters if get_mp3_duration(chapter) is not None)
+        total_duration = sum(
+            dur for dur in self.duration_calculator.durations.values()
+            if dur is not None
+        )
         total_str = format_duration(total_duration)
         print(f"Total duration: {total_str}")
 
+    def _initialize_durations(self):
+        """Load existing durations and start background calculation"""
+        _, existing_durations = load_progress(self.folder)
+
+        # Create duration calculator with existing durations
+        self.duration_calculator = DurationCalculator(
+            self.chapters,
+            existing_durations
+        )
+
+        # Start background calculation thread
+        calc_thread = threading.Thread(
+            target=self.duration_calculator.calculate_missing_durations,
+            daemon=True
+        )
+        calc_thread.start()
+
     def load_or_prompt_progress(self):
-        saved = load_progress(self.folder)
+        saved, _ = load_progress(self.folder)
         if saved is None:
             return
 
@@ -312,13 +430,21 @@ class AudiobookPlayer:
 
         elif cmd == "s":
             self.safe_print("\nStopping and saving progress.")
-            save_progress(self.folder, self.current)
+            save_progress(
+                self.folder, 
+                self.current,
+                self.duration_calculator.durations
+            )
             self.player.stop()
             self.stop_flag.set()
 
         elif cmd == "q":
             self.safe_print("\nQuitting (progress saved).")
-            save_progress(self.folder, self.current)
+            save_progress(
+                self.folder, 
+                self.current,
+                self.duration_calculator.durations
+            )
             self.player.stop()
             self.stop_flag.set()
 
@@ -348,8 +474,8 @@ class AudiobookPlayer:
                 break
 
             chapter = self.chapters[self.current]
-            duration = get_mp3_duration(chapter)
-            duration_str = format_duration(duration)
+            duration = self.duration_calculator.get_duration(chapter)
+            duration_str = format_duration(duration) if duration is not None else "Unknown"
             self.safe_print(
                 f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter).strip()} [{duration_str}]\n"
             )
@@ -376,7 +502,11 @@ class AudiobookPlayer:
 
         print("Goodbye.")
         self.player.stop()
-        save_progress(self.folder, min(self.current, len(self.chapters) - 1))
+        save_progress(
+            self.folder, 
+            min(self.current, len(self.chapters) - 1),
+            self.duration_calculator.durations
+        )
         self.getch.disable_raw()
 
 

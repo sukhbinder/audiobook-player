@@ -31,7 +31,7 @@ def main(args):
     player = AudiobookPlayer(folder)
     
     if args.list:
-        player.list_chapters()
+        player.list_chapters(block_for_durations=True)
         return
     
     player.start()
