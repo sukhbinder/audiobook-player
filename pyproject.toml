@@ -11,6 +11,7 @@ classifiers = [
 ]
 dependencies = [
 'afplay-win ; platform_system == "Windows"',
+'mutagen',
 ]
 
 [project.urls]

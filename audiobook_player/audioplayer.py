@@ -29,6 +29,12 @@ import signal
 import termios
 import tty
 from abc import ABC, abstractmethod
+from typing import Optional
+
+try:
+    from mutagen.mp3 import MP3
+except ImportError:
+    MP3 = None
 
 
 ############################################################
@@ -126,6 +132,33 @@ def get_media_player():
 PROGRESS_FILENAME = ".progress.json"
 
 
+def get_mp3_duration(filepath: str) -> Optional[float]:
+    """Get duration of MP3 file in seconds using mutagen."""
+    if MP3 is None:
+        return None
+    
+    try:
+        audio = MP3(filepath)
+        return audio.info.length
+    except Exception:
+        return None
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to HH:MM:SS format."""
+    if seconds is None:
+        return "Unknown"
+    
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+    
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    else:
+        return f"{minutes}:{seconds:02d}"
+
+
 def natural_key(s: str):
     name, ext = os.path.splitext(s)
     parts = re.split(r"(\d+)", name)
@@ -198,7 +231,7 @@ class AudiobookPlayer:
         self.current = 0
         self.command_q = queue.Queue()
         self.stop_flag = threading.Event()
-        self.getch = Getch()
+        self.getch = None
 
         # plug-in backend
         self.player = get_media_player()
@@ -210,8 +243,29 @@ class AudiobookPlayer:
         self.stop_flag.set()
         self.player.stop()
         save_progress(self.folder, self.current)
-        self.getch.disable_raw()
+        if self.getch:
+            self.getch.disable_raw()
         sys.exit(0)
+
+    def list_chapters(self):
+        """List all chapters with their durations."""
+        if not self.chapters:
+            print("No MP3 files found.")
+            return
+        
+        print(f"Found {len(self.chapters)} chapters in '{self.folder}':")
+        print("-" * 60)
+        
+        for i, chapter in enumerate(self.chapters, 1):
+            duration = get_mp3_duration(chapter)
+            duration_str = format_duration(duration)
+            filename = os.path.basename(chapter)
+            print(f"{i:2d}. {filename:40s} {duration_str}")
+        
+        print("-" * 60)
+        total_duration = sum(get_mp3_duration(chapter) for chapter in self.chapters if get_mp3_duration(chapter) is not None)
+        total_str = format_duration(total_duration)
+        print(f"Total duration: {total_str}")
 
     def load_or_prompt_progress(self):
         saved = load_progress(self.folder)
@@ -284,6 +338,7 @@ class AudiobookPlayer:
         self.load_or_prompt_progress()
         self._print_controls()
 
+        self.getch = Getch()
         threading.Thread(target=self._keyboard_thread, daemon=True).start()
 
         while not self.stop_flag.is_set():
@@ -293,8 +348,10 @@ class AudiobookPlayer:
                 break
 
             chapter = self.chapters[self.current]
+            duration = get_mp3_duration(chapter)
+            duration_str = format_duration(duration)
             self.safe_print(
-                f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter).strip()}\n"
+                f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter).strip()} [{duration_str}]\n"
             )
 
             self.player.play(chapter)

@@ -6,6 +6,12 @@ from .audioplayer import AudiobookPlayer
 def create_parser():
     parser = argparse.ArgumentParser(description="Simple audiobook player")
     parser.add_argument("folder", type=str, help="Folder path")
+    parser.add_argument(
+        "--list", 
+        "-l",
+        action="store_true",
+        help="List chapters with durations"
+    )
     return parser
 
 
@@ -23,4 +29,9 @@ def main(args):
         folder = input("Enter audiobook folder: ").strip()
 
     player = AudiobookPlayer(folder)
+    
+    if args.list:
+        player.list_chapters()
+        return
+    
     player.start()
