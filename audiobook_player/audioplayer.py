@@ -112,6 +112,9 @@ def get_media_player():
     elif system == "Linux":
         return OmxPlayer()
 
+    elif system == "Windows":
+        return AfplayPlayer()
+
     else:
         raise RuntimeError(f"Unsupported OS: {system}")
 
@@ -285,13 +288,13 @@ class AudiobookPlayer:
 
         while not self.stop_flag.is_set():
             if not (0 <= self.current < len(self.chapters)):
-                print("Reached end.")
+                self.safe_print("Reached end.")
                 save_progress(self.folder, max(0, len(self.chapters) - 1))
                 break
 
             chapter = self.chapters[self.current]
             self.safe_print(
-                f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter)}\n"
+                f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter).strip()}\n"
             )
 
             self.player.play(chapter)
