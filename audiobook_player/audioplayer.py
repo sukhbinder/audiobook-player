@@ -136,7 +136,7 @@ def get_mp3_duration(filepath: str) -> Optional[float]:
     """Get duration of MP3 file in seconds using mutagen."""
     if MP3 is None:
         return None
-    
+
     try:
         audio = MP3(filepath)
         return audio.info.length
@@ -148,11 +148,11 @@ def format_duration(seconds: float) -> str:
     """Format duration in seconds to HH:MM:SS format."""
     if seconds is None:
         return "Unknown"
-    
+
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     seconds = int(seconds % 60)
-    
+
     if hours > 0:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     else:
@@ -324,7 +324,7 @@ class AudiobookPlayer:
         self.stop_flag.set()
         self.player.stop()
         save_progress(
-            self.folder, 
+            self.folder,
             self.current,
             self.duration_calculator.durations if self.duration_calculator else {}
         )
@@ -337,29 +337,29 @@ class AudiobookPlayer:
         if not self.chapters:
             print("No MP3 files found.")
             return
-        
+
         # For --list command, block until all durations are calculated
         if block_for_durations:
             # Check if we have all durations already
             with self.duration_calculator.lock:
                 missing_count = sum(
-                    1 for chap in self.chapters 
+                    1 for chap in self.chapters
                     if os.path.basename(chap) not in self.duration_calculator.durations
                 )
-            
+
             if missing_count > 0:
                 print("Calculating durations...")
                 self.duration_calculator.calculate_missing_durations()
-        
+
         print(f"Found {len(self.chapters)} chapters in '{self.folder}':")
         print("-" * 60)
-        
+
         for i, chapter in enumerate(self.chapters, 1):
             duration = self.duration_calculator.get_duration(chapter)
             duration_str = format_duration(duration) if duration is not None else "Unknown"
             filename = os.path.basename(chapter)
             print(f"{i:2d}. {filename:40s} {duration_str}")
-        
+
         print("-" * 60)
         total_duration = sum(
             dur for dur in self.duration_calculator.durations.values()
@@ -431,7 +431,7 @@ class AudiobookPlayer:
         elif cmd == "s":
             self.safe_print("\nStopping and saving progress.")
             save_progress(
-                self.folder, 
+                self.folder,
                 self.current,
                 self.duration_calculator.durations
             )
@@ -441,7 +441,7 @@ class AudiobookPlayer:
         elif cmd == "q":
             self.safe_print("\nQuitting (progress saved).")
             save_progress(
-                self.folder, 
+                self.folder,
                 self.current,
                 self.duration_calculator.durations
             )
@@ -500,10 +500,10 @@ class AudiobookPlayer:
 
                 time.sleep(0.1)
 
-        print("Goodbye.")
+        self.safe_print("Goodbye.")
         self.player.stop()
         save_progress(
-            self.folder, 
+            self.folder,
             min(self.current, len(self.chapters) - 1),
             self.duration_calculator.durations
         )
