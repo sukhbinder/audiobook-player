@@ -36,9 +36,10 @@ def test_save_and_load_progress(tmpdir):
     audioplayer.save_progress(str(folder), 3)
 
     # Test load_progress function
-    progress, durations = audioplayer.load_progress(str(folder))
+    progress, durations, playback_history = audioplayer.load_progress(str(folder))
     assert progress == 3
     assert durations == {}
+    assert playback_history == []
 
 
 def test_save_and_load_progress_with_durations(tmpdir):
@@ -49,9 +50,10 @@ def test_save_and_load_progress_with_durations(tmpdir):
     audioplayer.save_progress(str(folder), 3, durations)
 
     # Test load_progress with durations
-    progress, loaded_durations = audioplayer.load_progress(str(folder))
+    progress, loaded_durations, playback_history = audioplayer.load_progress(str(folder))
     assert progress == 3
     assert loaded_durations == durations
+    assert playback_history == []
 
 
 def test_duration_calculator_initialization(player):
@@ -137,7 +139,8 @@ def test_handle_cmd_s(player):
         mock_save_progress.assert_called_once_with(
             player.folder, 
             player.current,
-            player.duration_calculator.durations
+            player.duration_calculator.durations,
+            player.playback_timer.get_history()
         )
 
 
@@ -149,5 +152,6 @@ def test_handle_cmd_q(player):
         mock_save_progress.assert_called_once_with(
             player.folder, 
             player.current,
-            player.duration_calculator.durations
+            player.duration_calculator.durations,
+            player.playback_timer.get_history()
         )

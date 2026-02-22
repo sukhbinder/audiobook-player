@@ -29,7 +29,8 @@ import signal
 import termios
 import tty
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, List, Dict
+from datetime import datetime
 
 try:
     from mutagen.mp3 import MP3
@@ -178,7 +179,7 @@ def find_mp3_files(folder: str):
     return [os.path.join(folder, f) for f in files]
 
 
-def save_progress(folder: str, idx: int, durations: dict = None):
+def save_progress(folder: str, idx: int, durations: dict = None, playback_history: list = None):
     path = os.path.join(folder, PROGRESS_FILENAME)
     try:
         progress_data = {}
@@ -194,6 +195,10 @@ def save_progress(folder: str, idx: int, durations: dict = None):
                 progress_data["durations"] = {}
             progress_data["durations"].update(durations)
 
+        # Update playback history if provided
+        if playback_history is not None:
+            progress_data["playback_history"] = playback_history
+
         with open(path, "w") as f:
             json.dump(progress_data, f)
     except Exception as e:
@@ -203,7 +208,7 @@ def save_progress(folder: str, idx: int, durations: dict = None):
 def load_progress(folder: str):
     path = os.path.join(folder, PROGRESS_FILENAME)
     if not os.path.exists(path):
-        return None, {}
+        return None, {}, []
 
     try:
         with open(path, "r") as f:
@@ -211,10 +216,11 @@ def load_progress(folder: str):
 
         last_chapter = obj.get("last_chapter")
         durations = obj.get("durations", {})
+        playback_history = obj.get("playback_history", [])
 
-        return last_chapter, durations
+        return last_chapter, durations, playback_history
     except Exception:
-        return None, {}
+        return None, {}, []
 
 
 ############################################################
@@ -235,6 +241,43 @@ class Getch:
 
     def get(self):
         return sys.stdin.read(1)
+
+
+############################################################
+# Playback Timer (Track listening sessions)
+############################################################
+
+class PlaybackTimer:
+    def __init__(self):
+        self.current_session = None
+        self.playback_history = []
+
+    def start_playback(self, chapter_index: int):
+        """Start tracking playback for a chapter"""
+        self.current_session = {
+            'chapter': chapter_index,
+            'start_time': datetime.now().isoformat(),
+            'end_time': None,
+            'duration_played': 0.0
+        }
+
+    def stop_playback(self):
+        """Stop tracking and record the session"""
+        if self.current_session:
+            self.current_session['end_time'] = datetime.now().isoformat()
+            start_time = datetime.fromisoformat(self.current_session['start_time'])
+            end_time = datetime.fromisoformat(self.current_session['end_time'])
+            self.current_session['duration_played'] = (end_time - start_time).total_seconds()
+            self.playback_history.append(self.current_session)
+            self.current_session = None
+
+    def get_history(self) -> List[Dict]:
+        """Get all playback history"""
+        return self.playback_history
+
+    def load_history(self, history_data: List[Dict]):
+        """Load existing playback history"""
+        self.playback_history = history_data or []
 
 
 ############################################################
@@ -313,6 +356,9 @@ class AudiobookPlayer:
         # plug-in backend
         self.player = get_media_player()
 
+        # Initialize playback timer
+        self.playback_timer = PlaybackTimer()
+
         # Initialize durations and start background calculation
         self.duration_calculator = None
         self._initialize_durations()
@@ -323,10 +369,13 @@ class AudiobookPlayer:
         print("\nCaught Ctrl+C — restoring terminal.")
         self.stop_flag.set()
         self.player.stop()
+        # Stop current playback timer session
+        self.playback_timer.stop_playback()
         save_progress(
             self.folder,
             self.current,
-            self.duration_calculator.durations if self.duration_calculator else {}
+            self.duration_calculator.durations if self.duration_calculator else {},
+            self.playback_timer.get_history()
         )
         if self.getch:
             self.getch.disable_raw()
@@ -369,8 +418,11 @@ class AudiobookPlayer:
         print(f"Total duration: {total_str}")
 
     def _initialize_durations(self):
-        """Load existing durations and start background calculation"""
-        _, existing_durations = load_progress(self.folder)
+        """Load existing durations and playback history, start background calculation"""
+        _, existing_durations, playback_history = load_progress(self.folder)
+
+        # Load playback history into timer
+        self.playback_timer.load_history(playback_history)
 
         # Create duration calculator with existing durations
         self.duration_calculator = DurationCalculator(
@@ -386,7 +438,7 @@ class AudiobookPlayer:
         calc_thread.start()
 
     def load_or_prompt_progress(self):
-        saved, _ = load_progress(self.folder)
+        saved, _, _ = load_progress(self.folder)
         if saved is None:
             return
 
@@ -421,29 +473,39 @@ class AudiobookPlayer:
         if cmd == "n":
             self.safe_print("Skipping to next.")
             self.player.stop()
+            # Stop current playback timer session
+            self.playback_timer.stop_playback()
             self.current = min(self.current + 1, len(self.chapters) - 1)
 
         elif cmd == "p":
             self.safe_print("\nGoing to previous.")
             self.player.stop()
+            # Stop current playback timer session
+            self.playback_timer.stop_playback()
             self.current = max(self.current - 1, 0)
 
         elif cmd == "s":
             self.safe_print("\nStopping and saving progress.")
+            # Stop current playback timer session
+            self.playback_timer.stop_playback()
             save_progress(
                 self.folder,
                 self.current,
-                self.duration_calculator.durations
+                self.duration_calculator.durations,
+                self.playback_timer.get_history()
             )
             self.player.stop()
             self.stop_flag.set()
 
         elif cmd == "q":
             self.safe_print("\nQuitting (progress saved).")
+            # Stop current playback timer session
+            self.playback_timer.stop_playback()
             save_progress(
                 self.folder,
                 self.current,
-                self.duration_calculator.durations
+                self.duration_calculator.durations,
+                self.playback_timer.get_history()
             )
             self.player.stop()
             self.stop_flag.set()
@@ -480,6 +542,8 @@ class AudiobookPlayer:
                 f"Playing chapter {self.current + 1}/{len(self.chapters)}: {os.path.basename(chapter).strip()} [{duration_str}]\n"
             )
 
+            # Start playback timer for this chapter
+            self.playback_timer.start_playback(self.current)
             self.player.play(chapter)
 
             # inner loop: check process and commands
@@ -495,6 +559,8 @@ class AudiobookPlayer:
 
                 # if track naturally ends
                 if not self.player.is_playing():
+                    # Stop current playback timer session
+                    self.playback_timer.stop_playback()
                     self.current += 1
                     break
 
@@ -502,10 +568,13 @@ class AudiobookPlayer:
 
         self.safe_print("Goodbye.")
         self.player.stop()
+        # Stop current playback timer session
+        self.playback_timer.stop_playback()
         save_progress(
             self.folder,
             min(self.current, len(self.chapters) - 1),
-            self.duration_calculator.durations
+            self.duration_calculator.durations,
+            self.playback_timer.get_history()
         )
         self.getch.disable_raw()
 
